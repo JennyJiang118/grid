@@ -1,5 +1,6 @@
 import pandas as pd
-import matplotlib
+import numpy as np
+import matplotlib.pyplot as plt
 import sklearn
 import sys
 import scipy
@@ -67,14 +68,44 @@ def get_change(grid_log):
 
 change_log = get_change(grid_log)
 
-def get_revenue(data, change_log, points):
-    for i in range(len(points))：# for each deal
+#%%
+def get_revenue(data, change_log, points, market, service_rate, bail_rate):
+    revenue_sum = 0
+    revenue_list = []
+    cnt = 0
+    hold = 0
+    for i in range(len(data)):
+        if i == points[cnt] and cnt != len(points)-1:
+            change_hold = change_log[cnt]
+            
+            hold = hold + change_hold
+            price = data.loc[i,'spread']
+            revenue_i = price * change_hold
 
+            mul = 300 if market=="IF" else 200
+            service = (data.iloc[i,2]+data.iloc[i,3])*mul*service_rate
+
+
+
+            revenue_sum = revenue_sum + revenue_i
+            cnt = cnt + 1
+            print(cnt, i)
+        revenue_list.append(revenue_sum)
+    return revenue_list
+
+market = "IF"
+revenue_list = get_revenue(data, change_log, points, market)
 
 
 # def service(data, grid_log, points):
 
 
+#%%
+# plot
+
+x = np.linspace(1,len(data),len(data))
+plt.plot(x, revenue_list)
+plt.show()
 
 '''
 def main():

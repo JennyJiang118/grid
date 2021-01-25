@@ -3,17 +3,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sklearn
 import sys
-import scipy
+from scipy import optimize as op
+
+#%%
+def load_data(path):
+    sys.path.insert(0,".")
+    #path = r"data/IF03-12.xlsx"
+    data = pd.read_excel(path).dropna(axis=0, how='any').reset_index()
+    return data
 
 
-# %%
-# load data
-sys.path.insert(0,".")
-path = r"data/IF03-12.xlsx"
-data = pd.read_excel(path).dropna(axis=0, how='any').reset_index()
-data['gap'] = data['spread'] - data['avg3']
+def data_process(data, grids, base_line):
+    data['gap'] = data['spread'] - data[base_line]
+    data['grid'] = data.gap.apply(lambda x: int(find_grid(x, grids)))
+    grid_log, points = deal_points(data)
+    change_log = get_change(grid_log)
+    return data, grid_log, points, change_log
 
-# %%
+
 
 def find_grid(x, grids):
     zero_idx = -1
@@ -50,13 +57,6 @@ def deal_points(data):
     return grid_log, points
 
 
-
-grids = [-18,-15,-12,-9,-6,-3,0,3,6,9,12,15,18]
-data['grid'] = data.gap.apply(lambda x: int(find_grid(x,grids)))
-grid_log, points = deal_points(data)
-
-
-# %%
 #---------------------------get revenue--------------------------#
 def get_change(grid_log):
     # get change in hold at each deal points
@@ -66,54 +66,138 @@ def get_change(grid_log):
         change_log[i] = change_log[i]-change_log[i-1]
     return change_log[1:]
 
-change_log = get_change(grid_log)
 
-#%%
-def get_revenue(data, change_log, points, market, service_rate, bail_rate):
+def get_revenue(data, change_log, points, market, service_rate, max_hold, min_hold):
     revenue_sum = 0
     revenue_list = []
     cnt = 0
     hold = 0
     for i in range(len(data)):
         if i == points[cnt] and cnt != len(points)-1:
+            mul = 200 if market=="IC" else 300
             change_hold = change_log[cnt]
-            
-            hold = hold + change_hold
-            price = data.loc[i,'spread']
-            revenue_i = price * change_hold
 
-            mul = 300 if market=="IF" else 200
-            service = (data.iloc[i,2]+data.iloc[i,3])*mul*service_rate
+            # hold/bail limit
+            deal = False if (hold==max_hold and change_hold==1) or (hold==min_hold and change_hold==-1) else True
+            if deal:
+                hold = hold + change_hold
 
+                price = data.loc[i,'spread']
+                revenue_i = price * mul * change_hold
 
+                service = (data.iloc[i,2]+data.iloc[i,3])*mul*service_rate
 
-            revenue_sum = revenue_sum + revenue_i
-            cnt = cnt + 1
-            print(cnt, i)
+                revenue_sum = revenue_sum + revenue_i - service
+                cnt = cnt + 1
         revenue_list.append(revenue_sum)
     return revenue_list
 
-market = "IF"
-revenue_list = get_revenue(data, change_log, points, market)
+def plot(data, revenue_list,grid_max, grid_min, grid_num):
+    x = np.linspace(1, len(data), len(data))
+    #x = data['datetime']
+    plt.title("grid max="+str(grid_max)+"  grid min="+str(grid_min)+"  grid num="+str(grid_num))
+    plt.plot(x, revenue_list)
+    plt.show()
 
+def plot_bp(data, revenue_list):
+    x = np.linspace(1,len(data),len(data))
+    plt.title("bp revenue")
+    plt.plot(x, revenue_list)
+    plt.show()
 
-# def service(data, grid_log, points):
+def main():
+#%%
+    #------------------------------set params----------------------#
+    path = "data/IF03-12.xlsx"
+    market = "IF"  # IF IC IH
+    service_rate = 0.000026  # 手续费
+    max_hold = 4 # 仓位上限
+    min_hold = -4 # 仓位下限
+    base_line = "avg3"  # avg3,avg5:均线选取，需在表中出现该列
+    grid_max = 10 # 网格上限
+    grid_min = -10 # 网格下限
+    grid_num = 5 # 网格数
 
+#------------------------------human set grids----------------------#
+    '''
+    这里处理的是人为给定的grids
+    使用自动调参时可以不运行
+    '''
+    grids = np.linspace(grid_min, grid_max, grid_num)
+    print(grids)
+    data_org = load_data(path)
+    data, grid_log, points, change_log = data_process(data_org,grids,base_line)
+    revenue_list = get_revenue(data, change_log, points, market, service_rate, max_hold, min_hold)
+    plot(data, revenue_list,grid_max,grid_min,grid_num)
 
 #%%
-# plot
+    #------------------------------BP-------------------------#
+    '''
+    #目标
+    获取最优网格grids
+    根据已有信息，自动调整grids密度，代替人工设置或调整
+    
+    #设计思路
+    使用逆向传播bp，斜率代替导数
+    
+    #注意事项
+    实际操作中根据历史价格作出参数调整，因此BP调整参数有效的前提在于，未来价格波动与历史价格波动有一定程度的一致性
+    训练速度较慢，实际高频操作中，分为以下几步：
+    1.使用human set grids找出相对较好的grids和其他参数，作为初步参数
+    2.实际操作时，根据对处理速度的要求，减少训练轮数EPOCH
+    3.BP中的初始grids参数，初始化为human set grids里的最优值
+    
+    #超参：
+        lr学习率
+        EPOCH总训练轮数
+    '''
+    EPOCH = 5
+    lr = 0.0001
 
-x = np.linspace(1,len(data),len(data))
-plt.plot(x, revenue_list)
-plt.show()
+    np.random.seed(0)
+    turb = np.random.randn(len(grids))/10
+    #turb = np.ones(len(grids))
 
-'''
-def main():
-    grids = [-18,-15,-12,-9,-6,-3,0,3,6,9,12,15,18]
-    data['grid'] = data.gap.apply(lambda x: int(find_grid(x,grids)))
+    grids_bp1 = grids[:]
+    grids_bp2 = grids[:] + turb
+
+    former_f = grids[:]
+    grid_limit = 20
+    
+    for epoch in range(EPOCH):
+        for i in range(len(grids)):
+            if epoch==0:
+                x2 = grids_bp2[i]
+                x1 = grids_bp1[i]
+                data2, grid_log2, points2, change_log2 = data_process(data_org,grids_bp2,base_line)
+                data1, grid_log1, points1, change_log1 = data_process(data_org,grids_bp1,base_line)
+                revenue_list2 = get_revenue(data2, change_log2, points2, market, service_rate, max_hold, min_hold)
+                revenue_list1 = get_revenue(data1, change_log1, points1, market, service_rate, max_hold, min_hold)
+                f2 = revenue_list2[-1]
+                f1 = revenue_list1[-1]
+                delta = (f2-f1)/(x2-x1)
+                grids_bp2[i] = grids_bp2[i] + lr*delta
+                grids_bp1[i] = x2
+                former_f[i] = f2
+            else:   #reuse former calculation
+                x2 = grids_bp2[i]
+                x1 = grids_bp1[i]
+                data2, grid_log2, points2, change_log2 = data_process(data_org,grids_bp2,base_line)
+                revenue_list2 = get_revenue(data2, change_log2, points2, market, service_rate, max_hold, min_hold)
+                f2 = revenue_list2[-1]
+                f1 = former_f[i]
+                delta = (f2 - f1) / (x2 - x1)
+                grids_bp2[i] = grids_bp2[i] + lr * delta
+                grids_bp1[i] = x2
+                former_f[i] = f2
+    grids_bp = sorted(grids_bp2)
+    grids_bp = grids_bp - grids_bp[int(len(grids_bp)/2)]
+    data_bp, grid_log_bp, points_bp, change_log_bp = data_process(data_org,grids_bp,base_line)
+    revenue_list_bp = get_revenue(data_bp, change_log_bp, points_bp, market, service_rate,max_hold, min_hold)
+    plot_bp(data, revenue_list_bp)
+    print(grids_bp)
 
 
 if __name__ == '__main__':
     main()
-'''
 

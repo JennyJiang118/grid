@@ -37,7 +37,6 @@ def find_grid(x, grids):
                 grid = i-zero_idx-1
                 break
     return grid
-    # save in data
 
 
 def deal_points(data):
@@ -151,8 +150,8 @@ def main():
         lr学习率
         EPOCH总训练轮数
     '''
-    EPOCH = 5
-    lr = 0.0001
+    EPOCH = 3
+    lr = 2e-6
 
     np.random.seed(0)
     turb = np.random.randn(len(grids))/10
@@ -162,8 +161,11 @@ def main():
     grids_bp2 = grids[:] + turb
 
     former_f = grids[:]
-    grid_limit = 20
-    
+
+    # to limit bp:
+    # i=0,len-1: grid_min, grid_max
+    # otherwise: i-1,i+1
+    sigma = 1
     for epoch in range(EPOCH):
         for i in range(len(grids)):
             if epoch==0:
@@ -176,7 +178,33 @@ def main():
                 f2 = revenue_list2[-1]
                 f1 = revenue_list1[-1]
                 delta = (f2-f1)/(x2-x1)
-                grids_bp2[i] = grids_bp2[i] + lr*delta
+                #grids_bp2[i] = grids_bp2[i] + lr*delta
+                tmp = grids_bp2[i] + lr*delta
+
+                # check limit
+                if i==0:
+                    if tmp<grid_min:
+                        grids_bp2[i]=grid_min
+                    elif tmp>grids_bp2[i+1]:
+                        grids_bp2[i]=grids_bp2[i+1]-sigma
+                    else:
+                        grids_bp2[i]=tmp
+                elif i==len(grids)-1:
+                    if tmp>grid_max:
+                        grids_bp2[i]=grid_max
+                    elif tmp<grids_bp2[i-1]:
+                        grids_bp2[i]=grids_bp2[i-1]+sigma
+                    else:
+                        grids_bp2[i]=tmp
+                else:
+                    if tmp>grids_bp2[i+1]:
+                        grids_bp2[i]=grids_bp2[i+1]-sigma
+                    elif tmp<grids_bp2[i-1]:
+                        grids_bp2[i]=grids_bp2[i-1]+sigma
+                    else:
+                        grids_bp2[i]=tmp
+
+
                 grids_bp1[i] = x2
                 former_f[i] = f2
             else:   #reuse former calculation
@@ -187,7 +215,31 @@ def main():
                 f2 = revenue_list2[-1]
                 f1 = former_f[i]
                 delta = (f2 - f1) / (x2 - x1)
-                grids_bp2[i] = grids_bp2[i] + lr * delta
+                #grids_bp2[i] = grids_bp2[i] + lr * delta
+                tmp = grids_bp2[i] + lr*delta
+
+                # check limit
+                if i == 0:
+                    if tmp < grid_min:
+                        grids_bp2[i] = grid_min
+                    elif tmp > grids_bp2[i + 1]:
+                        grids_bp2[i] = grids_bp2[i + 1] - sigma
+                    else:
+                        grids_bp2[i] = tmp
+                elif i == len(grids) - 1:
+                    if tmp > grid_max:
+                        grids_bp2[i] = grid_max
+                    elif tmp < grids_bp2[i - 1]:
+                        grids_bp2[i] = grids_bp2[i - 1] + sigma
+                    else:
+                        grids_bp2[i] = tmp
+                else:
+                    if tmp > grids_bp2[i + 1]:
+                        grids_bp2[i] = grids_bp2[i + 1] - sigma
+                    elif tmp < grids_bp2[i - 1]:
+                        grids_bp2[i] = grids_bp2[i - 1] + sigma
+                    else:
+                        grids_bp2[i] = tmp
                 grids_bp1[i] = x2
                 former_f[i] = f2
     grids_bp = sorted(grids_bp2)

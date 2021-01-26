@@ -63,6 +63,63 @@ def get_change(grid_log):
         change_log[i] = change_log[i]-change_log[i-1]
     return change_log[1:]
 
+def get_account(data, change_log, points, market, service_rate, bail_rate,max_hold, min_hold):
+    mul = 200 if market == "IC" else 300
+    service = 0
+    service_sum = 0
+    account_list = []
+    bail_stack =[]
+    cnt = 0
+    hold = 0
+    change_hold = 0
+    for i in range(len(data)):
+        if i == points[cnt] and cnt != len(points)-1:
+            change_hold = change_log[cnt]
+
+            # hold limit
+            deal = False if (hold==max_hold and change_hold>0) or (hold==min_hold and change_hold<0) else True
+            if deal:
+                old_hold = hold
+                hold = hold + change_hold
+                service = (data.iloc[i,2]+data.iloc[i,3])*mul*service_rate*abs(change_hold)
+
+                # bail
+                if old_hold*hold > 0:
+                    if change_hold*old_hold > 0:
+                        for times in range(abs(change_hold)):
+                            bail = (data.iloc[i,2]+data.iloc[i,3])*mul*bail_rate
+                            bail_stack.append(bail)
+                    else:
+                        for times in range(abs(change_hold)):
+                            bail_stack.pop()
+                elif old_hold*hold == 0:
+                    if old_hold == 0:
+                        for times in range(abs(change_hold)):
+                            bail = (data.iloc[i,2]+data.iloc[i,3])*mul*bail_rate
+                            bail_stack.append(bail)
+                    else:
+                        for times in range(abs(change_hold)):
+                            bail_stack.pop()
+                else:
+                    l = len(bail_stack)
+                    for times in range(l):
+                        bail_stack.pop()
+                    for times in range(abs(hold)):
+                        bail = (data.iloc[i, 2] + data.iloc[i, 3]) * mul * bail_rate
+                        bail_stack.append(bail)
+
+        value_sum = data.loc[i,"spread"] * mul * (hold + change_hold)
+        service_sum = service_sum + service
+        bail_sum = sum(bail_stack)
+        account_sum = value_sum - bail_sum - service_sum
+        account_list.append(account_sum)
+    return account_list
+
+
+
+
+
+
 
 def get_revenue(data, change_log, points, market, service_rate, max_hold, min_hold):
     revenue_sum = 0
@@ -105,14 +162,15 @@ def plot_bp(data, revenue_list, lr, EPOCH):
 def main():
 #%%
     #------------------------------set params----------------------#
-    path = "data/IC03-12.xlsx"
-    market = "IC"  # IF IC IH
+    path = "data/IF03-12.xlsx"
+    market = "IF"  # IF IC IH
     service_rate = 0.000026  # 手续费
+    bail_rate = 0.14    # 保证金
     max_hold = 4 # 仓位上限
     min_hold = -4 # 仓位下限
     base_line = "avg5"  # avg3,avg5:均线选取，需在表中出现该列
-    grid_max = 8 # 网格上限
-    grid_min = -8 # 网格下限
+    grid_max = 9 # 网格上限
+    grid_min = -9 # 网格下限
     grid_num = 5 # 网格数
 
 #------------------------------human set grids----------------------#
@@ -124,8 +182,9 @@ def main():
     grids = grids.tolist()
     data_org = load_data(path)
     data, grid_log, points, change_log = data_process(data_org,grids,base_line)
-    revenue_list = get_revenue(data, change_log, points, market, service_rate, max_hold, min_hold)
-    plot(data, revenue_list,grid_max,grid_min,grid_num)
+    #revenue_list = get_revenue(data, change_log, points, market, service_rate, max_hold, min_hold)
+    account_list = get_account(data,change_log,points,market,service_rate,bail_rate,max_hold,min_hold)
+    plot(data, account_list,grid_max,grid_min,grid_num)
 
 #%%
     #------------------------------BP-------------------------#
@@ -148,8 +207,8 @@ def main():
         lr学习率
         EPOCH总训练轮数
     '''
-    EPOCH = 3
-    lr = 1e-6
+    EPOCH = 10
+    lr = 1e-5
 
     np.random.seed(0)
     #turb = np.random.randn(len(grids))/10
@@ -177,10 +236,10 @@ def main():
                 x1 = grids_bp1[i]
                 data2, grid_log2, points2, change_log2 = data_process(data_org,grids_bp2,base_line)
                 data1, grid_log1, points1, change_log1 = data_process(data_org,grids_bp1,base_line)
-                revenue_list2 = get_revenue(data2, change_log2, points2, market, service_rate, max_hold, min_hold)
-                revenue_list1 = get_revenue(data1, change_log1, points1, market, service_rate, max_hold, min_hold)
-                f2 = revenue_list2[-1]
-                f1 = revenue_list1[-1]
+                account_list2 = get_account(data2, change_log2, points2, market, service_rate, bail_rate, max_hold, min_hold)
+                account_list1 = get_account(data1, change_log1, points1, market, service_rate, bail_rate, max_hold, min_hold)
+                f2 = account_list2[-1]
+                f1 = account_list1[-1]
                 delta = (f2-f1)/(x2-x1) if x2!=x1 else f2
                 tmp = grids_bp2[i] + lr*delta
 
@@ -215,8 +274,8 @@ def main():
                 x2 = grids_bp2[i]
                 x1 = grids_bp1[i]
                 data2, grid_log2, points2, change_log2 = data_process(data_org,grids_bp2,base_line)
-                revenue_list2 = get_revenue(data2, change_log2, points2, market, service_rate, max_hold, min_hold)
-                f2 = revenue_list2[-1]
+                account_list2 = get_account(data2, change_log2, points2, market, service_rate, bail_rate, max_hold, min_hold)
+                f2 = account_list2[-1]
                 f1 = former_f[i]
                 delta = (f2 - f1) / (x2 - x1) if x2!=x1 else f2
                 #grids_bp2[i] = grids_bp2[i] + lr * delta
@@ -248,8 +307,8 @@ def main():
                 former_f[i] = f2
     #grids_bp2 = grids_bp2 - grids_bp2[int(len(grids_bp2)/2)]
     data_bp, grid_log_bp, points_bp, change_log_bp = data_process(data_org,grids_bp2,base_line)
-    revenue_list_bp = get_revenue(data_bp, change_log_bp, points_bp, market, service_rate,max_hold, min_hold)
-    plot_bp(data, revenue_list_bp,lr,EPOCH)
+    account_list_bp = get_account(data_bp, change_log_bp, points_bp, market, service_rate,bail_rate, max_hold, min_hold)
+    plot_bp(data, account_list_bp,lr,EPOCH)
     print(grids_bp2)
 
 

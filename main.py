@@ -3,12 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sklearn
 import sys
-from scipy import optimize as op
+import copy
 
 #%%
 def load_data(path):
     sys.path.insert(0,".")
-    #path = r"data/IF03-12.xlsx"
     data = pd.read_excel(path).dropna(axis=0, how='any').reset_index()
     return data
 
@@ -59,7 +58,6 @@ def deal_points(data):
 #---------------------------get revenue--------------------------#
 def get_change(grid_log):
     # get change in hold at each deal points
-    # 4, 5, 4, 5, 4, 5, 4, 5, 4, 5, 4, 3,
     change_log = grid_log[:]
     for i in range(len(grid_log)-1,0,-1):
         change_log[i] = change_log[i]-change_log[i-1]
@@ -98,23 +96,23 @@ def plot(data, revenue_list,grid_max, grid_min, grid_num):
     plt.plot(x, revenue_list)
     plt.show()
 
-def plot_bp(data, revenue_list):
+def plot_bp(data, revenue_list, lr, EPOCH):
     x = np.linspace(1,len(data),len(data))
-    plt.title("bp revenue")
+    plt.title("bp revenue "+"lr="+str(lr)+" EPOCH="+str(EPOCH))
     plt.plot(x, revenue_list)
     plt.show()
 
 def main():
 #%%
     #------------------------------set params----------------------#
-    path = "data/IF03-12.xlsx"
-    market = "IF"  # IF IC IH
+    path = "data/IC03-12.xlsx"
+    market = "IC"  # IF IC IH
     service_rate = 0.000026  # 手续费
     max_hold = 4 # 仓位上限
     min_hold = -4 # 仓位下限
-    base_line = "avg3"  # avg3,avg5:均线选取，需在表中出现该列
-    grid_max = 10 # 网格上限
-    grid_min = -10 # 网格下限
+    base_line = "avg5"  # avg3,avg5:均线选取，需在表中出现该列
+    grid_max = 8 # 网格上限
+    grid_min = -8 # 网格下限
     grid_num = 5 # 网格数
 
 #------------------------------human set grids----------------------#
@@ -123,7 +121,7 @@ def main():
     使用自动调参时可以不运行
     '''
     grids = np.linspace(grid_min, grid_max, grid_num)
-    print(grids)
+    grids = grids.tolist()
     data_org = load_data(path)
     data, grid_log, points, change_log = data_process(data_org,grids,base_line)
     revenue_list = get_revenue(data, change_log, points, market, service_rate, max_hold, min_hold)
@@ -151,16 +149,22 @@ def main():
         EPOCH总训练轮数
     '''
     EPOCH = 3
-    lr = 2e-6
+    lr = 1e-6
 
     np.random.seed(0)
-    turb = np.random.randn(len(grids))/10
-    #turb = np.ones(len(grids))
+    #turb = np.random.randn(len(grids))/10
+    turb = np.ones(len(grids))
+
 
     grids_bp1 = grids[:]
     grids_bp2 = grids[:] + turb
-
     former_f = grids[:]
+
+    '''
+    grids_bp1 = copy.deepcopy(grids)
+    grids_bp2 = copy.deepcopy(grids) + turb
+    former_f = copy.deepcopy(grids)
+    '''
 
     # to limit bp:
     # i=0,len-1: grid_min, grid_max
@@ -177,9 +181,9 @@ def main():
                 revenue_list1 = get_revenue(data1, change_log1, points1, market, service_rate, max_hold, min_hold)
                 f2 = revenue_list2[-1]
                 f1 = revenue_list1[-1]
-                delta = (f2-f1)/(x2-x1)
-                #grids_bp2[i] = grids_bp2[i] + lr*delta
+                delta = (f2-f1)/(x2-x1) if x2!=x1 else f2
                 tmp = grids_bp2[i] + lr*delta
+
 
                 # check limit
                 if i==0:
@@ -214,7 +218,7 @@ def main():
                 revenue_list2 = get_revenue(data2, change_log2, points2, market, service_rate, max_hold, min_hold)
                 f2 = revenue_list2[-1]
                 f1 = former_f[i]
-                delta = (f2 - f1) / (x2 - x1)
+                delta = (f2 - f1) / (x2 - x1) if x2!=x1 else f2
                 #grids_bp2[i] = grids_bp2[i] + lr * delta
                 tmp = grids_bp2[i] + lr*delta
 
@@ -242,12 +246,11 @@ def main():
                         grids_bp2[i] = tmp
                 grids_bp1[i] = x2
                 former_f[i] = f2
-    grids_bp = sorted(grids_bp2)
-    grids_bp = grids_bp - grids_bp[int(len(grids_bp)/2)]
-    data_bp, grid_log_bp, points_bp, change_log_bp = data_process(data_org,grids_bp,base_line)
+    #grids_bp2 = grids_bp2 - grids_bp2[int(len(grids_bp2)/2)]
+    data_bp, grid_log_bp, points_bp, change_log_bp = data_process(data_org,grids_bp2,base_line)
     revenue_list_bp = get_revenue(data_bp, change_log_bp, points_bp, market, service_rate,max_hold, min_hold)
-    plot_bp(data, revenue_list_bp)
-    print(grids_bp)
+    plot_bp(data, revenue_list_bp,lr,EPOCH)
+    print(grids_bp2)
 
 
 if __name__ == '__main__':

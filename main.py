@@ -169,35 +169,28 @@ def nearest_adjust(grids,grid_max, grid_min):
                 break
     return grids
 
-def plot(data, account_list,grid_max, grid_min, grid_num):
-    x = np.linspace(1, len(data), len(data))
+def plot(len, account_list,grid_max, grid_min, grid_num):
+    x = np.linspace(1, len, len)
     #x = data['datetime']
     plt.title("grid max="+str(grid_max)+"  grid min="+str(grid_min)+"  grid num="+str(grid_num))
     plt.plot(x, account_list)
     plt.show()
 
-#%%
-def plot_bp(data, revenue_list, lr, EPOCH):
-    x = np.linspace(1,len(data),len(data))
+
+def plot_bp(len, revenue_list, lr, EPOCH):
+    x = np.linspace(1,len,len)
     plt.title("bp revenue "+"lr="+str(lr)+" EPOCH="+str(EPOCH))
     plt.plot(x, revenue_list)
     plt.show()
 
-def main():
-#%%
-    #------------------------------set params----------------------#
-    path = "data/IC03-12.xlsx"
-    market = "IC"  # IF IC IH
-    service_rate = 0.000026  # 手续费
-    bail_rate = 0.14    # 保证金
-    max_hold = 4 # 仓位上限
-    min_hold = -4 # 仓位下限
-    base_line = "avg3"  # avg3,avg5:均线选取，需在表中出现该列
-    grid_max = 5 # 网格上限
-    grid_min = -5 # 网格下限
-    grid_num = 4 # 网格数 固定
+def plot_run(len, revenue_list, grids):
+    x = np.linspace(1, len, len)
+    plt.title("grids:"+str(grids))
+    plt.plot(x, revenue_list)
+    plt.show()
 
-#------------------------------human set grids----------------------#
+def train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,grid_max,grid_min,grid_num):
+    # ------------------------------human set grids----------------------#
     '''
     这里处理的是人为给定的grids
     使用自动调参时可以不运行
@@ -206,100 +199,99 @@ def main():
     grids = grids.tolist()
     grids = nearest_adjust(grids, grid_max, grid_min)
     data_org = load_data(path)
-    #data, grid_log, points, change_log = data_process(data_org,grids,base_line)
-    data, points = data_process(data_org,grids,base_line)
-    #revenue_list = get_revenue(data, change_log, points, market, service_rate, max_hold, min_hold)
-    account_list = get_account(data,points,grids,market,service_rate,bail_rate,max_hold,min_hold)
-    plot(data, account_list,grid_max,grid_min,grid_num)
+    # data, grid_log, points, change_log = data_process(data_org,grids,base_line)
+    data, points = data_process(data_org, grids, base_line)
+    # revenue_list = get_revenue(data, change_log, points, market, service_rate, max_hold, min_hold)
+    account_list = get_account(data, points, grids, market, service_rate, bail_rate, max_hold, min_hold)
+    plot(len(data), account_list, grid_max, grid_min, grid_num)
 
-#%%
-    #------------------------------BP-------------------------#
+
+    # ------------------------------BP-------------------------#
     '''
     #目标
     获取最优网格grids
     根据已有信息，自动调整grids密度，代替人工设置或调整
-    
+
     #设计思路
     使用逆向传播bp，斜率代替导数
-    
+
     #注意事项
     实际操作中根据历史价格作出参数调整，因此BP调整参数有效的前提在于，未来价格波动与历史价格波动有一定程度的一致性
     训练速度较慢，实际高频操作中，分为以下几步：
     1.使用human set grids找出相对较好的grids和其他参数，作为初步参数
     2.BP中的初始grids参数，初始化为human set grids里的最优值
-    
+
     #超参：
         lr学习率
         EPOCH总训练轮数
     '''
     EPOCH = 3
-    lr = 1e-6#1e-6
+    lr = 1e-6  # 1e-6
 
     np.random.seed(0)
-    #turb = np.random.randn(len(grids))/10
+    # turb = np.random.randn(len(grids))/10
     turb = np.ones(len(grids))
-
 
     grids_bp1 = grids[:]
     grids_bp2 = grids[:] + turb
     former_f = grids[:]
 
-
     # to limit bp:
     # i=0,len-1: grid_min, grid_max
     # otherwise: i-1,i+1
-    sigma = int((grid_max-grid_min)/grid_num)
+    sigma = int((grid_max - grid_min) / grid_num)
     for epoch in range(EPOCH):
         for i in range(len(grids)):
-            if epoch==0:
+            if epoch == 0:
                 x2 = grids_bp2[i]
                 x1 = grids_bp1[i]
-                data2, points2 = data_process(data_org,grids_bp2,base_line)
-                data1, points1 = data_process(data_org,grids_bp1,base_line)
-                account_list2 = get_account(data2, points2, grids_bp2, market, service_rate, bail_rate, max_hold, min_hold)
-                account_list1 = get_account(data1, points1, grids_bp1, market, service_rate, bail_rate, max_hold, min_hold)
+                data2, points2 = data_process(data_org, grids_bp2, base_line)
+                data1, points1 = data_process(data_org, grids_bp1, base_line)
+                account_list2 = get_account(data2, points2, grids_bp2, market, service_rate, bail_rate, max_hold,
+                                            min_hold)
+                account_list1 = get_account(data1, points1, grids_bp1, market, service_rate, bail_rate, max_hold,
+                                            min_hold)
                 f2 = account_list2[-1]
                 f1 = account_list1[-1]
-                delta = (f2-f1)/(x2-x1) if x2!=x1 else f2
-                tmp = grids_bp2[i] + abs(x2-x1)*lr*delta # 动态学习率：x1x2相差小时，delta大
-
+                delta = (f2 - f1) / (x2 - x1) if x2 != x1 else f2
+                tmp = grids_bp2[i] + abs(x2 - x1) * lr * delta  # 动态学习率：x1x2相差小时，delta大
 
                 # check limit
-                if i==0:
-                    if tmp<grid_min:
-                        grids_bp2[i]=grid_min
-                    elif tmp>grids_bp2[i+1]:
-                        grids_bp2[i]=grids_bp2[i+1]-sigma
+                if i == 0:
+                    if tmp < grid_min:
+                        grids_bp2[i] = grid_min
+                    elif tmp > grids_bp2[i + 1]:
+                        grids_bp2[i] = grids_bp2[i + 1] - sigma
                     else:
-                        grids_bp2[i]=tmp
-                elif i==len(grids)-1:
-                    if tmp>grid_max:
-                        grids_bp2[i]=grid_max
-                    elif tmp<grids_bp2[i-1]:
-                        grids_bp2[i]=grids_bp2[i-1]+sigma
+                        grids_bp2[i] = tmp
+                elif i == len(grids) - 1:
+                    if tmp > grid_max:
+                        grids_bp2[i] = grid_max
+                    elif tmp < grids_bp2[i - 1]:
+                        grids_bp2[i] = grids_bp2[i - 1] + sigma
                     else:
-                        grids_bp2[i]=tmp
+                        grids_bp2[i] = tmp
                 else:
-                    if tmp>grids_bp2[i+1]:
-                        grids_bp2[i]=grids_bp2[i+1]-sigma
-                    elif tmp<grids_bp2[i-1]:
-                        grids_bp2[i]=grids_bp2[i-1]+sigma
+                    if tmp > grids_bp2[i + 1]:
+                        grids_bp2[i] = grids_bp2[i + 1] - sigma
+                    elif tmp < grids_bp2[i - 1]:
+                        grids_bp2[i] = grids_bp2[i - 1] + sigma
                     else:
-                        grids_bp2[i]=tmp
-
+                        grids_bp2[i] = tmp
 
                 grids_bp1[i] = x2
                 former_f[i] = f2
-            else:   #reuse former calculation
+            else:  # reuse former calculation
                 x2 = grids_bp2[i]
                 x1 = grids_bp1[i]
-                data2, points2 = data_process(data_org,grids_bp2,base_line)
-                account_list2 = get_account(data2, points2, grids_bp2, market, service_rate, bail_rate, max_hold, min_hold)
+                data2, points2 = data_process(data_org, grids_bp2, base_line)
+                account_list2 = get_account(data2, points2, grids_bp2, market, service_rate, bail_rate, max_hold,
+                                            min_hold)
                 f2 = account_list2[-1]
                 f1 = former_f[i]
-                delta = (f2 - f1) / (x2 - x1) if x2!=x1 else f2
-                #grids_bp2[i] = grids_bp2[i] + lr * delta
-                tmp = grids_bp2[i] + abs(x2-x1)*lr*delta
+                delta = (f2 - f1) / (x2 - x1) if x2 != x1 else f2
+                # grids_bp2[i] = grids_bp2[i] + lr * delta
+                tmp = grids_bp2[i] + abs(x2 - x1) * lr * delta
 
                 # check limit
                 if i == 0:
@@ -325,15 +317,52 @@ def main():
                         grids_bp2[i] = tmp
                 grids_bp1[i] = x2
                 former_f[i] = f2
-    data_bp, points_bp = data_process(data_org,grids_bp2,base_line)
-    #account_list_bp = get_account(data_bp, points_bp, grids_bp2, market, service_rate,bail_rate, max_hold, min_hold)
-    #plot_bp(data, account_list_bp,lr,EPOCH)
-    #print(grids_bp2)
+    data_bp, points_bp = data_process(data_org, grids_bp2, base_line)
+    # account_list_bp = get_account(data_bp, points_bp, grids_bp2, market, service_rate,bail_rate, max_hold, min_hold)
+    # plot_bp(data, account_list_bp,lr,EPOCH)
+    # print(grids_bp2)
 
-    grids_adjust = nearest_adjust(grids_bp2,grid_max,grid_min)
-    print(grids_adjust)
-    account_list_adjust = get_account(data_bp, points_bp, grids_adjust, market, service_rate,bail_rate, max_hold, min_hold)
-    plot_bp(data, account_list_adjust,lr,EPOCH)
+    grids_adjust = nearest_adjust(grids_bp2, grid_max, grid_min)
+    account_list_adjust = get_account(data_bp, points_bp, grids_adjust, market, service_rate, bail_rate, max_hold,
+                                      min_hold)
+    plot_bp(len(data), account_list_adjust, lr, EPOCH)
+    return grids_adjust
+
+def run(path,grids,base_line,market,service_rate,bail_rate,max_hold,min_hold):
+    data_org = load_data(path)
+    data, points = data_process(data_org, grids, base_line)
+    account_list = get_account(data, points, grids, market, service_rate, bail_rate, max_hold, min_hold)
+    plot_run(len(data), account_list, grids)
+    return account_list
+
+def main():
+#%%
+    #------------------------------set params----------------------#
+    path = "data/IF03-01.xlsx"
+    market = "IF"  # IF IC IH
+
+    # 检验时不需重新设置
+    service_rate = 0.000026  # 手续费
+    bail_rate = 0.14    # 保证金
+    max_hold = 4 # 仓位上限
+    min_hold = -4 # 仓位下限
+    base_line = "avg3"  # avg3,avg5:均线选取，需在表中出现该列
+
+    # 检验时不需设置
+    grid_max = 3 # 网格上限
+    grid_min = -3 # 网格下限
+    grid_num = 4 # 网格数 固定
+
+# ------------------------------set params----------------------#
+
+    # train
+    grids = train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,grid_max,grid_min,grid_num)
+
+    # run
+    #grids = [-4.2, -1. ,  2.4,  5. ]
+    #account = run(path,grids,base_line,market,service_rate,bail_rate,max_hold,min_hold)
+
+
 
 
 

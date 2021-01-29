@@ -13,10 +13,7 @@ def load_data(path):
 def data_process(data, grids, base_line):
     data['gap'] = data['spread'] - data[base_line]
     data['grid'] = data.gap.apply(lambda x: int(find_grid(x, grids)))
-    #grid_log, points = deal_points(data)#
-    #change_log = get_change(grid_log)#
     points = cross_points(data)
-    #return data, grid_log, points, change_log#
     return data, points
 
 
@@ -44,7 +41,7 @@ def cross_points(data):
 #---------------------------get revenue--------------------------#
 #%%
 def get_account(data, points, grids, market, service_rate, bail_rate, max_hold, min_hold):
-    account_list = [] # bag+revenue-service-bail
+    account_list = []
     service = 0 # 叠加 每点更新
     bag = 0 # 落袋金额
     bail_stack = [] # 每点push pop并sum
@@ -54,23 +51,26 @@ def get_account(data, points, grids, market, service_rate, bail_rate, max_hold, 
     mul = 200 if market == "IC" else 300
     pre_grid = 1 # 上一单所处网格
     for i in range(len(data)):
-        if i == points[cnt] and cnt != len(points)-1: # 是交叉点 可能可以交易
-            if hold == 0: # 从头开始
-                if data.loc[i, "grid"] < (grids[0]+grids[-1])/2: # 所处网格较低，涨空间大，买入
-                    hold = 1
-                else:
-                    hold = -1
-                pre_grid = data.loc[i,"grid"]
-                service = service + (data.iloc[i,2]+data.iloc[i,3])*mul*service_rate
-                bail = (data.iloc[i,2]+data.iloc[i,3])*mul*bail_rate
-                bail_stack.append(bail)
-                price_stack.append(data.loc[i,"spread"])
-            else: # 与前期比较是否需要更改
-
+        new_service = 0
+        if hold == 0:  # 从头开始
+            if data.loc[i, "grid"] < ((grids[0] + grids[-1]) / 2):  # 所处网格较低，涨空间大，买入
+                hold = 1
+            else:
+                hold = -1
+            pre_grid = data.loc[i, "grid"]
+            new_service = (data.iloc[i, 2] + data.iloc[i, 3]) * mul * service_rate
+            bail = (data.iloc[i, 2] + data.iloc[i, 3]) * mul * bail_rate
+            bail_stack.append(bail)
+            price_stack.append(data.loc[i, "spread"])
+            if i == points[cnt] and cnt != len(points)-1:
+                cnt = cnt + 1
+        else:
+            if i == points[cnt] and cnt != len(points)-1: # 是交叉点 可能可以交易
                 # change_hold需要在实际操作中再得出来，否则会有持仓或资金的限制
                 intend_change = data.loc[i,"grid"]-pre_grid
                 deal = True
                 change_hold = 0
+
                 if intend_change>0:
                     if hold==max_hold: deal = False
                     else:
@@ -86,7 +86,9 @@ def get_account(data, points, grids, market, service_rate, bail_rate, max_hold, 
                     old_hold = hold
                     hold = hold + change_hold
                     pre_grid = data.loc[i,"grid"]
-                    service = service + (data.iloc[i, 2] + data.iloc[i, 3]) * mul * service_rate * abs(change_hold)
+
+                    new_service = (data.iloc[i, 2] + data.iloc[i, 3]) * mul * service_rate * abs(change_hold)
+
                     price = data.loc[i,"spread"]
                     # bail & price append
                     bail = (data.iloc[i, 2] + data.iloc[i, 3]) * bail_rate * mul
@@ -100,7 +102,7 @@ def get_account(data, points, grids, market, service_rate, bail_rate, max_hold, 
                                 bail_stack.pop()
                                 old_price = price_stack.pop()
                                 bag = bag + abs(price - old_price)*mul
-                    if old_hold * hold == 0:
+                    elif old_hold * hold == 0:
                         if old_hold == 0:
                             for times in range(abs(change_hold)):
                                 bail_stack.append(bail)
@@ -119,14 +121,146 @@ def get_account(data, points, grids, market, service_rate, bail_rate, max_hold, 
                             bail_stack.append(bail)
                             price_stack.append(price)
 
+                cnt = cnt + 1
 
-            cnt = cnt + 1
 
         # i点account计算
-        revenue = data.loc[i,"spread"] * hold - sum(price_stack)
+        revenue = data.loc[i,"spread"] * hold - sum(price_stack) if hold>=0 else sum(price_stack)+data.loc[i,"spread"]*hold
+        service = service + new_service
         account = revenue + bag - service #- sum(bail_stack)
         account_list.append(account)
     return account_list
+
+
+def get_account_log(data, points, grids, market, service_rate, bail_rate, max_hold, min_hold):
+    data['hold'] = ''
+    data['service'] = ''
+    data['bag'] = ''
+    data['revenue'] = ''
+    data['account'] = ''
+    service = 0 # 叠加 每点更新
+    bag = 0 # 落袋金额
+    bail_stack = [] # 每点push pop并sum
+    price_stack = [] # 存储仓内买入、卖空价
+    hold = 0 # 总持有数
+    cnt = 0 # 网格交叉点计数
+    mul = 200 if market == "IC" else 300
+    pre_grid = 1 # 上一单所处网格
+    change = [-1,-1]
+    for i in range(len(data)):
+        new_service = 0
+        if hold == 0:  # 从头开始
+            # fake change
+            deal = True
+            change2=change[:]
+            change2[0]=change2[1]
+            change2[1]=data.loc[i,"grid"]
+            if sorted(change) == sorted(change2):
+                deal = False
+            '''
+            pos = 0
+            for idx in range(len(grids)):
+                if data.loc[i,"grid"]==grids[idx]:
+                    pos = idx
+                    break
+            hold = int(len(grids)/2)-idx
+            '''
+            if deal:
+                if data.loc[i, "grid"] < ((grids[0] + grids[-1]) / 2):  # 所处网格较低，涨空间大，买入
+                    hold = 1
+                else:
+                  hold = -1
+
+                pre_grid = data.loc[i, "grid"]
+                new_service = (data.iloc[i, 2] + data.iloc[i, 3]) * mul * service_rate
+                bail = (data.iloc[i, 2] + data.iloc[i, 3]) * mul * bail_rate
+                bail_stack.append(bail)
+                price_stack.append(data.loc[i, "spread"])
+
+                change[0]=change[1]
+                change[1]=data.loc[i,"grid"]
+
+                if i == points[cnt] and cnt != len(points)-1:
+                    cnt = cnt + 1
+        else:
+            if i == points[cnt] and cnt != len(points)-1: # 是交叉点 可能可以交易
+                # change_hold需要在实际操作中再得出来，否则会有持仓或资金的限制
+                intend_change = data.loc[i,"grid"]-pre_grid
+                deal = True
+                change_hold = 0
+
+                if intend_change>0:
+                    if hold==max_hold: deal = False
+                    else:
+                        deal = True
+                        change_hold = min(intend_change, max_hold-hold)
+                elif intend_change<0:
+                    if hold==min_hold: deal = False
+                    else:
+                        deal = True
+                        change_hold = max(intend_change, min_hold-hold)
+
+                # fake change
+                change2 = change[:]
+                change2[0] = change2[1]
+                change2[1] = data.loc[i,"grid"]
+                if sorted(change)==sorted(change2):
+                    deal = False
+
+                if deal:
+                    old_hold = hold
+                    hold = hold + change_hold
+                    pre_grid = data.loc[i,"grid"]
+
+                    new_service = (data.iloc[i, 2] + data.iloc[i, 3]) * mul * service_rate * abs(change_hold)
+
+                    price = data.loc[i,"spread"]
+                    # bail & price append
+                    bail = (data.iloc[i, 2] + data.iloc[i, 3]) * bail_rate * mul
+                    if old_hold * hold > 0:
+                        if change_hold * old_hold > 0:  # pay bail
+                            for times in range(abs(change_hold)):
+                                bail_stack.append(bail)
+                                price_stack.append(price)
+                        else:  # no pay
+                            for times in range(abs(change_hold)):
+                                bail_stack.pop()
+                                old_price = price_stack.pop()
+                                bag = bag + abs(price - old_price)*mul
+                    elif old_hold * hold == 0:
+                        if old_hold == 0:
+                            for times in range(abs(change_hold)):
+                                bail_stack.append(bail)
+                                price_stack.append(price)
+
+                        else:
+                            for times in range(abs(change_hold)):
+                                bail_stack.pop()
+                                old_price = price_stack.pop()
+                                bag = bag + abs(price - old_price)*mul
+                    else:
+                        bag = bag + abs(price*len(price_stack) - sum(price_stack))*mul
+                        bail_stack.clear()
+                        price_stack.clear()
+                        for times in range(abs(hold)):
+                            bail_stack.append(bail)
+                            price_stack.append(price)
+                    change[0]=change[1]
+                    change[1]=data.loc[i,"grid"]
+                cnt = cnt + 1
+
+
+        # i点account计算
+        revenue = data.loc[i,"spread"] * hold - sum(price_stack) if hold>=0 else sum(price_stack)+data.loc[i,"spread"]*hold
+        revenue = revenue * mul
+        service = service + new_service
+        account = revenue + bag - service #- sum(bail_stack)
+        data.loc[i,'hold']=hold
+        data.loc[i,'service']=new_service
+        data.loc[i,'bag']=bag
+        data.loc[i,'revenue']=revenue
+        data.loc[i,'account']=account
+    return data
 
 def get_revenue(data, change_log, points, market, service_rate, max_hold, min_hold):
     revenue_sum = 0
@@ -176,10 +310,9 @@ def plot(len, account_list,grid_max, grid_min, grid_num):
     plt.plot(x, account_list)
     plt.show()
 
-
-def plot_bp(len, revenue_list, lr, EPOCH):
+def plot_bp(len, revenue_list, lr, EPOCH,grids):
     x = np.linspace(1,len,len)
-    plt.title("bp revenue "+"lr="+str(lr)+" EPOCH="+str(EPOCH))
+    plt.title("bp revenue "+"lr="+str(lr)+" EPOCH="+str(EPOCH)+" grids="+str(grids))
     plt.plot(x, revenue_list)
     plt.show()
 
@@ -189,6 +322,7 @@ def plot_run(len, revenue_list, grids):
     plt.plot(x, revenue_list)
     plt.show()
 
+#%%
 def train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,grid_max,grid_min,grid_num):
     # ------------------------------human set grids----------------------#
     '''
@@ -199,9 +333,7 @@ def train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,
     grids = grids.tolist()
     grids = nearest_adjust(grids, grid_max, grid_min)
     data_org = load_data(path)
-    # data, grid_log, points, change_log = data_process(data_org,grids,base_line)
     data, points = data_process(data_org, grids, base_line)
-    # revenue_list = get_revenue(data, change_log, points, market, service_rate, max_hold, min_hold)
     account_list = get_account(data, points, grids, market, service_rate, bail_rate, max_hold, min_hold)
     plot(len(data), account_list, grid_max, grid_min, grid_num)
 
@@ -225,6 +357,7 @@ def train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,
         lr学习率
         EPOCH总训练轮数
     '''
+
     EPOCH = 3
     lr = 1e-6  # 1e-6
 
@@ -317,28 +450,35 @@ def train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,
                         grids_bp2[i] = tmp
                 grids_bp1[i] = x2
                 former_f[i] = f2
-    data_bp, points_bp = data_process(data_org, grids_bp2, base_line)
+    # data_bp, points_bp = data_process(data_org, grids_bp2, base_line)
     # account_list_bp = get_account(data_bp, points_bp, grids_bp2, market, service_rate,bail_rate, max_hold, min_hold)
     # plot_bp(data, account_list_bp,lr,EPOCH)
     # print(grids_bp2)
 
     grids_adjust = nearest_adjust(grids_bp2, grid_max, grid_min)
-    account_list_adjust = get_account(data_bp, points_bp, grids_adjust, market, service_rate, bail_rate, max_hold,
+
+    data_adjust, points_adjust = data_process(data_org, grids_adjust, base_line)
+    bp_log_adjust = get_account_log(data_adjust, points_adjust, grids_adjust, market, service_rate, bail_rate, max_hold,
                                       min_hold)
-    plot_bp(len(data), account_list_adjust, lr, EPOCH)
-    return grids_adjust
+    account_list_adjust = bp_log_adjust["account"]
+    plot_bp(len(data), account_list_adjust, lr, EPOCH,grids_adjust)
+    bp_log_adjust.to_csv("data/bp_log2.csv")
+
+    return grids_adjust, bp_log_adjust
 
 def run(path,grids,base_line,market,service_rate,bail_rate,max_hold,min_hold):
     data_org = load_data(path)
     data, points = data_process(data_org, grids, base_line)
-    account_list = get_account(data, points, grids, market, service_rate, bail_rate, max_hold, min_hold)
+    data_log = get_account_log(data, points, grids, market, service_rate, bail_rate, max_hold, min_hold)
+    account_list = data_log["account"]
     plot_run(len(data), account_list, grids)
+    #data_log.to_csv("data/data_log2.csv")
     return account_list
 
 def main():
 #%%
     #------------------------------set params----------------------#
-    path = "data/IF03-01.xlsx"
+    path = "data/IF03-12.xlsx"
     market = "IF"  # IF IC IH
 
     # 检验时不需重新设置
@@ -356,10 +496,13 @@ def main():
 # ------------------------------set params----------------------#
 
     # train
-    grids = train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,grid_max,grid_min,grid_num)
-
+    grids, log = train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,grid_max,grid_min,grid_num)
+    print(grids)
     # run
     #grids = [-4.2, -1. ,  2.4,  5. ]
+    #grids = np.linspace(grid_min, grid_max, grid_num)
+    #grids = grids.tolist()
+    #grids = nearest_adjust(grids, grid_max, grid_min)
     #account = run(path,grids,base_line,market,service_rate,bail_rate,max_hold,min_hold)
 
 

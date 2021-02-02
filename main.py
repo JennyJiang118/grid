@@ -3,13 +3,36 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sys
 
-#%%
+
 def load_data(path):
     sys.path.insert(0,".")
-    data = pd.read_excel(path).dropna(axis=0, how='any').reset_index()
+    data = pd.read_csv(path)
+
+    idx = []
+    for i in range(len(data)):
+        if data.iloc[i,1]==0 or data.iloc[i,2]==0:
+            idx.append(i)
+
+    data = data.drop(idx).reset_index(drop=True)
+
+    data["avg3"] = ''
+    data["avg5"] = ''
+    for i in range(720,len(data)):
+        data.loc[i,"avg3"] = round(np.mean(data.loc[i-720:i,"spread"])/0.2)*0.2
+    for i in range(1200,len(data)):
+        data.loc[i,"avg5"] = round(np.mean(data.loc[i-1200:i,"spread"])/0.2)*0.2
+
+    idx.clear()
+    for i in range(len(data)):
+        if data.loc[i,"avg3"]=='' or data.loc[i,"avg5"]=='':
+            idx.append(i)
+    data = data.drop(idx).reset_index(drop=True)
+    #data = data.dropna(axis=0, how='any').reset_index()
+    #data.to_csv("data/log/0906_pro_data.csv")
     return data
 
 
+#%%
 def data_process(data, grids, base_line):
     data['gap'] = data['spread'] - data[base_line]
     data['grid'] = data.gap.apply(lambda x: int(find_grid(x, grids)))
@@ -50,19 +73,15 @@ def nearest(x,change):
 
 
 def get_account(data, points, grids, market, service_rate, bail_rate, max_hold, min_hold):
-    data['hold'] = ''
-    data['service'] = ''
-    data['bag'] = ''
-    data['revenue'] = ''
-    data['account'] = ''
     service = 0 # 叠加 每点更新
     bag = 0 # 落袋金额
     price_stack = [] # 存储仓内买入、卖空价
     hold = 0 # 总持有数
     cnt = 0 # 网格交叉点计数
     mul = 200 if market == "IC" else 300
+    pre_grid = 1 # 上一单所处网格
     change = [-1,-1]
-    account_list=[]
+    account_list = []
     for i in range(len(data)):
         new_service = 0
         if i == 0:  # 从头开始
@@ -76,6 +95,7 @@ def get_account(data, points, grids, market, service_rate, bail_rate, max_hold, 
 
             for times in range(abs(hold)):
                 price_stack.append(price)
+
 
             if data.loc[i, "grid"] > max(change):
                 change[0] = max(change)
@@ -127,7 +147,7 @@ def get_account(data, points, grids, market, service_rate, bail_rate, max_hold, 
                 if deal:
                     old_hold = hold
                     hold = hold + change_hold
-                    new_service = (data.iloc[i, 2] + data.iloc[i, 3]) * mul * service_rate * abs(change_hold)
+                    new_service = (data.iloc[i, 1] + data.iloc[i, 2]) * mul * service_rate * abs(change_hold)
 
                     price = data.loc[i,"spread"]
                     # bail & price append
@@ -138,7 +158,7 @@ def get_account(data, points, grids, market, service_rate, bail_rate, max_hold, 
                         else:  # no pay
                             for times in range(abs(change_hold)):
                                 old_price = price_stack.pop()
-                                bag = bag + abs(price - old_price)*mul
+                                bag = bag + (price - old_price)*mul if old_hold>0 else bag + (old_price-price)*mul
                     elif old_hold * hold == 0:
                         if old_hold == 0:
                             for times in range(abs(change_hold)):
@@ -146,10 +166,11 @@ def get_account(data, points, grids, market, service_rate, bail_rate, max_hold, 
                         else:
                             for times in range(abs(change_hold)):
                                 old_price = price_stack.pop()
-                                bag = bag + abs(price - old_price)*mul
+                                bag = bag + (price - old_price)*mul if old_hold>0 else bag + (old_price-price)*mul
                     else:
-                        bag = bag + abs(price*len(price_stack) - sum(price_stack))*mul
-                        price_stack.clear()
+                        for times in range(abs(old_hold)):
+                            old_price = price_stack.pop()
+                            bag = bag + (price - old_price) * mul if old_hold > 0 else bag + (old_price - price) * mul
                         for times in range(abs(hold)):
                             price_stack.append(price)
 
@@ -179,7 +200,6 @@ def get_account(data, points, grids, market, service_rate, bail_rate, max_hold, 
         account = revenue + bag - service #- sum(bail_stack)
         account_list.append(account)
     return account_list
-
 
 def get_account_log(data, points, grids, market, service_rate, bail_rate, max_hold, min_hold):
     data['hold'] = ''
@@ -260,7 +280,7 @@ def get_account_log(data, points, grids, market, service_rate, bail_rate, max_ho
                 if deal:
                     old_hold = hold
                     hold = hold + change_hold
-                    new_service = (data.iloc[i, 2] + data.iloc[i, 3]) * mul * service_rate * abs(change_hold)
+                    new_service = (data.iloc[i, 1] + data.iloc[i, 2]) * mul * service_rate * abs(change_hold)
 
                     price = data.loc[i,"spread"]
                     # bail & price append
@@ -271,7 +291,8 @@ def get_account_log(data, points, grids, market, service_rate, bail_rate, max_ho
                         else:  # no pay
                             for times in range(abs(change_hold)):
                                 old_price = price_stack.pop()
-                                bag = bag + abs(price - old_price)*mul
+                                bag = bag + (price - old_price)*mul if old_hold>0 else bag + (old_price-price)*mul
+
                     elif old_hold * hold == 0:
                         if old_hold == 0:
                             for times in range(abs(change_hold)):
@@ -279,9 +300,11 @@ def get_account_log(data, points, grids, market, service_rate, bail_rate, max_ho
                         else:
                             for times in range(abs(change_hold)):
                                 old_price = price_stack.pop()
-                                bag = bag + abs(price - old_price)*mul
+                                bag = bag + (price - old_price)*mul if old_hold>0 else bag + (old_price-price)*mul
+
                     else:
-                        bag = bag + abs(price*len(price_stack) - sum(price_stack))*mul
+                        for times in range(abs(old_hold)):
+                            bag = bag + (price - old_price)*mul if old_hold>0 else bag +(old_price-price)*mul
                         price_stack.clear()
                         for times in range(abs(hold)):
                             price_stack.append(price)
@@ -366,10 +389,15 @@ def train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,
     data_org = load_data(path)
     data, points = data_process(data_org, grids, base_line)
     data = get_account_log(data, points, grids, market, service_rate, bail_rate, max_hold, min_hold)
-    data.to_csv("data/log/IF0312_9.csv")
+    #data.to_csv("data/log/IF0906_data.csv")
     account_list = data['account']
     plot(len(data), account_list, grid_max, grid_min, grid_num)
 
+    g_withdraw, win_ratio, sharp = get_result(data, max(abs(max_hold),abs(min_hold)))
+    print("收益：",data.loc[len(data)-1,"account"])
+    print("最大回撤：",g_withdraw)
+    print("胜率：",win_ratio)
+    print("sharp比：",sharp)
 
     # ------------------------------BP-------------------------#
     '''
@@ -391,8 +419,8 @@ def train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,
         EPOCH总训练轮数
     '''
 
-    EPOCH = 3
-    lr = 1e-6  # 1e-6
+    EPOCH = 3#3
+    lr = 1e-6 # 1e-6
 
     np.random.seed(0)
     # turb = np.random.randn(len(grids))/10
@@ -402,10 +430,13 @@ def train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,
     grids_bp2 = grids[:] + turb
     former_f = grids[:]
 
+    #grid_max_real = max(data["gap"])
+    #grid_min_real = min(data["gap"])
+
     # to limit bp:
     # i=0,len-1: grid_min, grid_max
     # otherwise: i-1,i+1
-    sigma = int((grid_max - grid_min) / grid_num)
+    sigma = 2 #int((grid_max - grid_min) / grid_num)
     for epoch in range(EPOCH):
         for i in range(len(grids)):
             if epoch == 0:
@@ -475,9 +506,9 @@ def train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,
                     else:
                         grids_bp2[i] = tmp
                 else:
-                    if tmp > grids_bp2[i + 1]:
+                    if tmp > grids_bp2[i + 1]-sigma:
                         grids_bp2[i] = grids_bp2[i + 1] - sigma
-                    elif tmp < grids_bp2[i - 1]:
+                    elif tmp < grids_bp2[i - 1]+sigma:
                         grids_bp2[i] = grids_bp2[i - 1] + sigma
                     else:
                         grids_bp2[i] = tmp
@@ -491,7 +522,7 @@ def train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,
                                       min_hold)
     account_list_adjust = bp_log_adjust["account"]
     plot_bp(len(data), account_list_adjust, lr, EPOCH,grids_adjust)
-    bp_log_adjust.to_csv("data/log/IF0312_9_bp.csv")
+    #bp_log_adjust.to_csv("data/log/IF0312_9_bp.csv")
 
     return grids_adjust, bp_log_adjust
 
@@ -501,32 +532,71 @@ def run(path,grids,base_line,market,service_rate,bail_rate,max_hold,min_hold):
     data_log = get_account_log(data, points, grids, market, service_rate, bail_rate, max_hold, min_hold)
     account_list = data_log["account"]
     plot_run(len(data), account_list, grids)
-    data_log.to_csv("data/log/tmp.csv")
+    #data_log.to_csv("data/log/IF20-1209.csv")
     return account_list
+
+def get_result(log, hold):
+
+    account = log["account"]
+    idx_h = 0 # 0~i-1最高点的索引
+    g_withdraw = float('-inf')# 全局最大回撤 对应最高点和最低点的索引
+    pre_account = float('-inf')
+    win, total = 0, 0
+
+    for i in range(len(account)):
+        # 最大回撤
+        if i>0:
+            if account[idx_h] < account[i-1]:
+                idx_h = i-1
+
+            drawdown = account[idx_h] - account[i]
+            if drawdown>g_withdraw:
+                g_withdraw = drawdown
+
+            # 胜率
+            if log.loc[i,"bag"]!=log.loc[i-1,"bag"]:
+                total = total + 1
+                if log.loc[i,"account"]>pre_account:
+                    win  = win + 1
+                pre_account = log.loc[i,"account"]
+
+    win_ratio = win/total
+
+    # sharp
+    w = hold*400000
+    r_mean = np.mean(account)/w
+    r_s = np.std(account,ddof=1)/(w*w)
+    r_f = 3.97/100
+    sharp = (r_mean-r_f)/r_s
+
+    return g_withdraw, win_ratio, sharp
+
 
 def main():
 #%%
     #------------------------------set params----------------------#
-    path = "data/IF03-12.xlsx"
+    path = "data/IC_IF/IF/IF2009-2006.csv"
+    #path = "data/IF03-12.csv"
     market = "IF"  # IF IC IH
 
     # 检验时不需重新设置
     service_rate = 0.000026  # 手续费
-    bail_rate = 0.14    # 保证金
+    bail_rate = 0
     max_hold = 4 # 仓位上限
     min_hold = -4 # 仓位下限
     base_line = "avg3"  # avg3,avg5:均线选取，需在表中出现该列
 
     # 检验时不需设置
-    grid_max =  6# 网格上限
-    grid_min = -6 # 网格下限
+    grid_max =  10# 9 网格上限
+    grid_min = -10 # 网格下限
     grid_num = 8 # 网格数 固定
 
+#%%
 # ------------------------------set params----------------------#
 
     # train
-    #grids, log = train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,grid_max,grid_min,grid_num)
-    #print(grids)
+    grids, log = train_params(path,market,service_rate,bail_rate,max_hold,min_hold,base_line,grid_max,grid_min,grid_num)
+
 
 
     # run
@@ -534,9 +604,9 @@ def main():
     #grids = np.linspace(grid_min, grid_max, grid_num)
     #grids = grids.tolist()
     #grids = nearest_adjust(grids, grid_max, grid_min)
-    grids = [-9,-6,-3,0,3,6,9]
-    #grids = [-3.2,-2.2,-1,0.2,1.4,2.6,3.8,4]
-    account_list = run(path,grids,base_line,market,service_rate,bail_rate,max_hold,min_hold)
+    #grids = [-9,-6,-3,0,3,6,9]
+    #grids = np.linspace(grid_min,grid_max,grid_num)
+    #account_list = run(path,grids,base_line,market,service_rate,bail_rate,max_hold,min_hold)
 
 
 

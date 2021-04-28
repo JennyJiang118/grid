@@ -36,7 +36,7 @@ def load_data(path):# 对整个数据处理,我们假装不知道"这个时间"�
     data = data.drop(idx).reset_index(drop=True)
     return data
 
-path =  "data/IC_IF/IF/IF2012-2009.csv"
+path =  "data/IC_IF/IF/IF2012-2009-exe.csv"
 data = load_data(path)
 
 #%%
@@ -87,41 +87,87 @@ def find_interval(x,grids): # 判断当前在哪个区间
 #%%
 path_time = "data/phase2/execute_time/time1209.csv"
 execute_time = pd.read_csv(path_time)
-def do_time_series(data, execute_time,frequency):
+freq = 5 #每5分钟调整一次网格，体现在idx上，整除5
+#%%
+def do_time_series(data, execute_time,T1):
     # 首先判断最新时间在哪个区间
-    get = -1
-    start = -1
-    end = -1
-    cnt = 0
-    for i in range(len(data)-1,-1,-1):
-        # 新添加的数据里，必有处在可执行区间里的数才行
+    # 可以做ts的必要条件：data尾部数据在可执行区间内，记尾部可执行数据标号为idx_end
+    # 第二步，判断idx_start = idx_end-T1 是否在"该"区间内
+    time_idx = -1 #执行区间编号
+    for i in range(len(execute_time)):#如果尾部数据在执行区间内，在哪个区间
+        if data.loc[len(data)-1,'30min_idx']>execute_time.iloc[i,0] and data.loc[len(data)-1,'30min_idx']<execute_time.iloc[i,1]:
+            time_idx = i
+            break
 
-
-
-        if get==-1:
-            for j in range(execute_time.shape[0]):
-                if data.loc[i,'30min_idx']>=execute_time.iloc[j,0] and data.loc[i,'30min_idx']<=execute_time.iloc[j,1]:
-                    get=j
-                    end = i
-                    cnt += 1
-                    break
+    if time_idx!=-1:
+        if len(data)<T1: #时间长度不够
+            time_idx = -1
         else:
-            if data.loc[i,'30min_idx']>=execute_time.iloc[get,0] and data.loc[i,'30min_idx']<=execute_time.iloc[j,1]:
-                start = i
-                cnt += 1
+            if data.loc[len(data)-T1,'30min_idx']<execute_time.iloc[time_idx,0]: #从idx_end倒退的idx_start不在该执行区间
+                time_idx = -1
             else:
-                if cnt>=200:
-                    return start,end
-                else:
-                    return -1,-1
-
-    return -1,-1
-
-start,end = do_time_series(data,execute_time,frequency)
+                idx_start = len(data)-T1
+                idx_end = len(data)
+                itv_end = data.loc[len(data)-1,'30min_idx']
 
 
+    if time_idx == -1:
+        idx_start,idx_end,itv_end = -1,-1,-1
+
+    return time_idx,idx_start,idx_end,itv_end
+
+T1=180
+time_idx, idx_start,idx_end,itv_end= do_time_series(data,execute_time,T1)
+
+# 往下预测的时长
+fc_len = 0 if time_idx==-1 else max(30,(execute_time.iloc[time_idx,1]-itv_end)*30)
+
+#%%
+'''
+进入预测部分：
+1  fc_len!=0: 进入预测
+2  读取对应volatility数据
+3  auto.arima
+4  根据预测确定上下偏移的量
+5  更新grid&interval
+'''
+v_path = 'data/index_volatility/IF2012-2009.csv'
+volatility_data = pd.read_csv(v_path)
+data = pd.merge(data,volatility_data,on='datetime',how='inner')
+
+#%%
+#from pyramid.arima import auto_arima
+from pmdarima.arima import auto_arima
 
 
+
+# 调整完了之后，执行区间结束，需要调回去吗？
+# 不用，spread已经变过了
+
+class TS():
+    def __init__(self,data,fc_len=0,time_idx=0,idx_start=0,idx_end=0):
+        self.data = data
+        self.fc_len = fc_len
+        self.time_idx = time_idx
+        self.idx_start = idx_start
+        self.idx_end = idx_end
+        self.shift = 0 #应该偏移的量
+        if self.fc_len!=0:
+            self.split()
+
+    def split(self):
+        train = data.loc[idx_start:idx_end,['spread_x','index_volatility']]
+        train = train.rename(columns={'spread_x':'spread','index_volatility':'v'})
+        self.data = train
+
+    def arima(self):
+        #150+30
+        model = auto_arima(train,)
+
+
+
+
+one = TS(data,fc_len=120,time_idx=time_idx,idx_start=idx_start,idx_end=idx_end)
 
 
 

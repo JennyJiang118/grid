@@ -120,7 +120,7 @@ T1=180
 time_idx, idx_start,idx_end,itv_end= do_time_series(data,execute_time,T1)
 
 # 往下预测的时长
-fc_len = 0 if time_idx==-1 else max(30,(execute_time.iloc[time_idx,1]-itv_end)*30)
+fc_len = 0 if time_idx==-1 else freq
 
 #%%
 '''
@@ -136,15 +136,17 @@ volatility_data = pd.read_csv(v_path)
 data = pd.merge(data,volatility_data,on='datetime',how='inner')
 
 #%%
-#from pyramid.arima import auto_arima
 from pmdarima.arima import auto_arima
 
 
 
 # 调整完了之后，执行区间结束，需要调回去吗？
 # 不用，spread已经变过了
+# 要变
+# 两个都试一下，比较
 
-class TS():
+class gridSummary():
+    # 当前时间，根据时间序列（如果有的话，没有就是0）应该作出的网格调整
     def __init__(self,data,fc_len=0,time_idx=0,idx_start=0,idx_end=0):
         self.data = data
         self.fc_len = fc_len
@@ -152,10 +154,11 @@ class TS():
         self.idx_start = idx_start
         self.idx_end = idx_end
         self.shift = 0 #应该偏移的量
+        self.density = 3 #网格间隙
         if self.fc_len!=0:
             self.split()
 
-    def split(self):
+    def split(self):#data只保留spread,index_volatility
         train = data.loc[idx_start:idx_end,['spread_x','index_volatility']]
         train = train.rename(columns={'spread_x':'spread','index_volatility':'v'})
         self.data = train
@@ -167,7 +170,8 @@ class TS():
 
 
 
-one = TS(data,fc_len=120,time_idx=time_idx,idx_start=idx_start,idx_end=idx_end)
+
+one = gridSummary(data,fc_len=120,time_idx=time_idx,idx_start=idx_start,idx_end=idx_end)
 
 
 
@@ -378,6 +382,4 @@ def get_account_log_two_points(data, points, grids, market, service_rate, max_ho
     return data
 
 '''
-
-
 
